@@ -1,0 +1,22 @@
+[project]
+name = "chatbot-fp"
+version = "0.1.0"
+description = "Chatbot API — FastAPI backend"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.135.3",
+    "python-dotenv>=1.2.2",
+    "uvicorn>=0.44.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "anyio[trio]>=4.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
