@@ -89,139 +89,73 @@ npm run build   # runs: tsc && vite build — type errors fail the build
   - `backend/app/models/chat.py` — Pydantic `ChatResponse`
   - `frontend/src/types/index.ts` — TypeScript `ChatResponse`
   - Both must stay in sync when the API contract changes.
-- No CI, no pre-commit hooks. Verification is manual: `uv run pytest` + `npm run build`.
+- No automated quality CI (tests/build) and no pre-commit hooks yet. Verification is manual: `uv run pytest` + `npm run build`.
+- Deployment automation is planned via GitHub Actions (see Azure deployment plan stages).
 
 ---
 
 ## Azure deployment plan (free tier)
 
+### IaC tooling
+- **Infrastructure as Code: Bicep** — all Azure resources are declared in `infra/main.bicep`.
+- Deployment command: `az deployment group create` (after creating the resource group manually).
+- The resource group itself is created imperatively with `az group create` since Bicep requires an existing scope.
+
 ### Resources to create in Azure
-- Resource Group: `rg-cbfp-dev-eus2-01`
-- Static Web App (Free): `swa-cbfp-dev-01`
-- App Service Plan (F1 Free): `asp-cbfp-dev-free-01`
-- Web App for backend API: `app-cbfp-api-dev-01`
-- Budget (subscription scope): `budget-cbfp-dev-monthly-01`
-- Action Group for budget alerts (optional): `ag-cbfp-dev-cost-01`
+- Resource Group: `rg-cbfp-dev-01`
+- Static Web App (Free): `swa-cbfp-dev-cus-01`
+- App Service Plan (F1 Free): `asp-cbfp-dev-free-cac-01`
+- Web App for backend API: `app-cbfp-api-dev-cac-01`
 
 ### Naming convention
 - Prefix: `cbfp` (project short name)
 - Environment: `dev`
-- Region code: `eus2` for `eastus2`
+- Region code: `cus` for `centralus` (solo SWA) y `cac` for `canadacentral` (ASP + Web App)
 - Suffix rule by resource type: always end with sequential `-01`
 - Collision rule: if name already exists, increment only that resource type to `-02`, then `-03`, etc.
 
-### Deployment steps (excluding phase 6)
-1. Local validation (blocking): run backend tests from `backend/` with `uv run pytest`.
-2. Local backend check: run `uv run uvicorn app.main:app --reload` and verify `GET /health`.
-3. Local frontend check: run `npm run build` from `frontend/`.
-4. Confirm production env vars: `ALLOWED_ORIGINS` and `OPENAI_API_KEY` (only if real LLM is enabled).
-5. Provision Azure resources: create `rg-cbfp-dev-eus2-01`.
-6. Create frontend hosting: create Static Web App Free `swa-cbfp-dev-01`.
-7. Create backend hosting: create App Service Plan F1 `asp-cbfp-dev-free-01` and Web App `app-cbfp-api-dev-01`.
-8. Configure backend app settings: set `ALLOWED_ORIGINS` to the final Static Web App domain.
-9. Deploy backend code: publish API to `app-cbfp-api-dev-01` (Zip Deploy or GitHub Actions).
-10. Verify backend in Azure: validate `GET /health` and `POST /api/chat/`.
-11. Deploy frontend code: publish built frontend to `swa-cbfp-dev-01`.
-12. End-to-end validation: open frontend URL and verify chat request/response flow.
-13. Cost guardrails: create `budget-cbfp-dev-monthly-01` with low threshold alert (for example, $1).
-14. Optional notifications: connect alert to `ag-cbfp-dev-cost-01`.
+### IaC structure
+```
+infra/
+├── main.bicep          # declares SWA, ASP, Web App; accepts parameters
+└── main.bicepparam     # parameter values for the dev environment
+```
+
+Key Bicep parameters:
+- `swaLocation` — `centralus`
+- `appLocation` — `canadacentral`
+- `swaName` — `swa-cbfp-dev-02`
+- `aspName` — `asp-cbfp-dev-free-01`
+- `webAppName` — `app-cbfp-api-dev-01`
+- `allowedOrigins` — SWA default hostname (set after first deploy or passed as override)
+
+### Two-stage rollout plan
+
+### Stage 1 — Provision Azure resources (one-time or on infra changes)
+1. Pre-flight quota check: verify Free VM quota in `canadacentral` — `az vm list-usage --location canadacentral`.
+2. Create resource group (imperative — scope required by Bicep):
+   `az group create --name rg-cbfp-dev-cac-01 --location canadacentral`
+3. Deploy infrastructure with Bicep (idempotent):
+   `az deployment group create --resource-group rg-cbfp-dev-cac-01 --template-file infra/main.bicep --parameters infra/main.bicepparam`
+4. Retrieve SWA hostname from deployment output and confirm `ALLOWED_ORIGINS` is correct in Web App settings.
+
+### Stage 2 — Continuous deployment with GitHub Actions
+1. Create CI/CD workflows in `.github/workflows/` so deployment happens from GitHub Actions, not from local machines.
+2. Add a backend workflow (`deploy-backend.yml`) with jobs to: checkout, setup Python/uv, run `uv run pytest` from `backend/`, package app, and deploy to `app-cbfp-api-dev-01` (Zip Deploy or `azure/webapps-deploy`).
+3. Add a frontend workflow (`deploy-frontend.yml`) with jobs to: checkout, setup Node, run `npm ci` + `npm run build` from `frontend/`, and publish `frontend/dist/` to `swa-cbfp-dev-02`.
+4. Configure required repository secrets for workflows (at minimum): `AZURE_CREDENTIALS`, `AZURE_WEBAPP_NAME`, `AZURE_RESOURCE_GROUP`, `AZURE_STATIC_WEB_APPS_API_TOKEN`, and `OPENAI_API_KEY` if real LLM is enabled.
+5. Configure required app settings in Azure for runtime (`ALLOWED_ORIGINS` and optional `OPENAI_API_KEY`) so deployment and execution remain decoupled.
+6. Use trigger strategy: automatic on push to `main`, plus `workflow_dispatch` for controlled/manual releases.
+7. Add post-deploy smoke tests as workflow steps: verify backend `GET /health`, `POST /api/chat/`, and end-to-end call from SWA URL.
+8. Use environment protection rules for production (required reviewers/approvals) before deploy jobs execute.
+
+### Re-deploy / update rules
+- Infrastructure updates: re-run Stage 1, step 3. Bicep is idempotent and performs incremental updates by default.
+- Application-only updates: use Stage 2 GitHub Actions workflows without reprovisioning infrastructure.
+- To change a parameter (e.g., `ALLOWED_ORIGINS`), update `infra/main.bicepparam` and re-run Stage 1, step 3.
 
 ### Name increment examples
 - If `swa-cbfp-dev-01` already exists, use `swa-cbfp-dev-02`.
 - If `app-cbfp-api-dev-01` already exists, use `app-cbfp-api-dev-02`.
 - Do not increment unrelated resource types when only one name collides.
 
-### Azure CLI commands (`az`)
-
-> These commands are a baseline for the resources and names defined above. If a name is already taken, increment only that resource type (`-01` -> `-02`).
-
-```powershell
-# 0) Prerequisites
-az login
-az account set --subscription "<SUBSCRIPTION_ID_OR_NAME>"
-
-# Variables
-$RG = "rg-cbfp-dev-eus2-01"
-$LOC = "eastus2"
-$SWA_NAME = "swa-cbfp-dev-01"
-$PLAN_NAME = "asp-cbfp-dev-free-01"
-$WEBAPP_NAME = "app-cbfp-api-dev-01"
-$BUDGET_NAME = "budget-cbfp-dev-monthly-01"
-$AG_NAME = "ag-cbfp-dev-cost-01"
-
-# 1) Resource group
-az group create --name $RG --location $LOC
-
-# 2) Static Web App (Free)
-# Requires repo and branch for integrated CI/CD.
-az staticwebapp create `
-  --name $SWA_NAME `
-  --resource-group $RG `
-  --location $LOC `
-  --sku Free `
-  --source "https://github.com/<ORG_OR_USER>/<REPO>" `
-  --branch "main" `
-  --app-location "frontend" `
-  --output-location "dist"
-
-# 3) App Service Plan F1 + Web App (Linux)
-az appservice plan create `
-  --name $PLAN_NAME `
-  --resource-group $RG `
-  --location $LOC `
-  --sku F1 `
-  --is-linux
-
-az webapp create `
-  --name $WEBAPP_NAME `
-  --resource-group $RG `
-  --plan $PLAN_NAME `
-  --runtime "PYTHON|3.12"
-
-# 4) Backend app settings (set ALLOWED_ORIGINS after obtaining SWA default hostname)
-$SWA_HOSTNAME = az staticwebapp show --name $SWA_NAME --resource-group $RG --query "defaultHostname" -o tsv
-az webapp config appsettings set `
-  --name $WEBAPP_NAME `
-  --resource-group $RG `
-  --settings `
-    ALLOWED_ORIGINS="https://$SWA_HOSTNAME" `
-    SCM_DO_BUILD_DURING_DEPLOYMENT=true
-
-# Optional, only if real LLM is enabled:
-# az webapp config appsettings set --name $WEBAPP_NAME --resource-group $RG --settings OPENAI_API_KEY="<SECRET>"
-
-# 5) Deploy backend (run from repo root; creates zip from backend folder)
-cd backend
-if (Test-Path backend.zip) { Remove-Item backend.zip -Force }
-Compress-Archive -Path * -DestinationPath backend.zip -Force
-az webapp deploy `
-  --resource-group $RG `
-  --name $WEBAPP_NAME `
-  --src-path backend.zip `
-  --type zip
-cd ..
-
-# 6) Verify backend
-az webapp show --name $WEBAPP_NAME --resource-group $RG --query "defaultHostName" -o tsv
-# Health check URL: https://<WEBAPP_DEFAULT_HOSTNAME>/health
-
-# 7) Create monthly budget at subscription scope (US$1)
-$SUB_ID = az account show --query id -o tsv
-$START_DATE = "2026-04-01"
-$END_DATE = "2027-04-01"
-
-az consumption budget create `
-  --budget-name $BUDGET_NAME `
-  --scope "/subscriptions/$SUB_ID" `
-  --amount 1 `
-  --category cost `
-  --time-grain monthly `
-  --start-date $START_DATE `
-  --end-date "$END_DATE"
-
-# 8) Optional Action Group for budget notifications
-az monitor action-group create `
-  --name $AG_NAME `
-  --resource-group $RG `
-  --short-name "cbfpcost"
-```

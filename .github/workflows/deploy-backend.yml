@@ -1,0 +1,116 @@
+name: Deploy Backend (App Service)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - .github/workflows/deploy-backend.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configurar uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Instalar dependencias
+        working-directory: backend
+        run: uv sync --group dev --frozen
+
+      - name: Ejecutar pruebas backend
+        working-directory: backend
+        run: uv run pytest
+
+      - name: Login en Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Configurar app settings (opcionales)
+        if: ${{ secrets.AZURE_ALLOWED_ORIGINS != '' || secrets.OPENAI_API_KEY != '' }}
+        shell: bash
+        run: |
+          SETTINGS=()
+          if [ -n "${{ secrets.AZURE_ALLOWED_ORIGINS }}" ]; then
+            SETTINGS+=("ALLOWED_ORIGINS=${{ secrets.AZURE_ALLOWED_ORIGINS }}")
+          fi
+
+          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            SETTINGS+=("OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}")
+          fi
+
+          if [ ${#SETTINGS[@]} -gt 0 ]; then
+            az webapp config appsettings set \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+              --settings "${SETTINGS[@]}"
+          fi
+
+      - name: Desplegar backend a App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          package: backend
+
+      - name: Smoke tests backend
+        shell: bash
+        env:
+          BASE_URL: https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base_url = os.environ["BASE_URL"].rstrip("/")
+
+          def get_json(url: str) -> tuple[int, dict]:
+              req = urllib.request.Request(url, method="GET")
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  status = resp.getcode()
+                  data = json.loads(resp.read().decode("utf-8"))
+              return status, data
+
+          def post_json(url: str, payload: dict) -> tuple[int, dict]:
+              body = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  url,
+                  data=body,
+                  method="POST",
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  status = resp.getcode()
+                  data = json.loads(resp.read().decode("utf-8"))
+              return status, data
+
+          health_status, health_data = get_json(f"{base_url}/health")
+          assert health_status == 200, f"/health devolvio {health_status}"
+          assert health_data.get("status") == "ok", f"Respuesta inesperada: {health_data}"
+
+          chat_status, chat_data = post_json(
+              f"{base_url}/api/chat/", {"message": "Prueba CI"}
+          )
+          assert chat_status == 200, f"/api/chat/ devolvio {chat_status}"
+          assert "respuesta" in chat_data, f"Falta campo 'respuesta': {chat_data}"
+
+          print("Smoke tests backend OK")
+          PY

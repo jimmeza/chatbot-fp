@@ -1,0 +1,123 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "4174842784386119571"
+    }
+  },
+  "parameters": {
+    "swaLocation": {
+      "type": "string",
+      "defaultValue": "centralus",
+      "metadata": {
+        "description": "Región Azure para el Static Web App."
+      }
+    },
+    "appLocation": {
+      "type": "string",
+      "defaultValue": "canadacentral",
+      "metadata": {
+        "description": "Región Azure para App Service Plan y Web App backend."
+      }
+    },
+    "swaName": {
+      "type": "string",
+      "metadata": {
+        "description": "Nombre del Static Web App."
+      }
+    },
+    "aspName": {
+      "type": "string",
+      "metadata": {
+        "description": "Nombre del App Service Plan."
+      }
+    },
+    "webAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Nombre del Web App (API backend)."
+      }
+    },
+    "allowedOrigins": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Orígenes permitidos para CORS (hostname del SWA). Vacío en el primer despliegue; actualizar con el hostname real y re-desplegar."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/staticSites",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('swaName')]",
+      "location": "[parameters('swaLocation')]",
+      "sku": {
+        "name": "Free",
+        "tier": "Free"
+      },
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('aspName')]",
+      "location": "[parameters('appLocation')]",
+      "kind": "linux",
+      "sku": {
+        "name": "F1",
+        "tier": "Free"
+      },
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[parameters('appLocation')]",
+      "kind": "app,linux",
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('aspName'))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "linuxFxVersion": "PYTHON|3.13",
+          "appCommandLine": "uvicorn app.main:app --host 0.0.0.0 --port 8000",
+          "appSettings": [
+            {
+              "name": "ALLOWED_ORIGINS",
+              "value": "[parameters('allowedOrigins')]"
+            },
+            {
+              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('aspName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "swaHostname": {
+      "type": "string",
+      "metadata": {
+        "description": "Hostname del Static Web App (usar como valor de allowedOrigins en el segundo despliegue)."
+      },
+      "value": "[reference(resourceId('Microsoft.Web/staticSites', parameters('swaName')), '2023-01-01').defaultHostname]"
+    },
+    "webAppUrl": {
+      "type": "string",
+      "metadata": {
+        "description": "URL del Web App backend."
+      },
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2023-01-01').defaultHostName)]"
+    }
+  }
+}
