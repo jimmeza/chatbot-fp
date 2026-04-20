@@ -48,7 +48,7 @@ jobs:
           action: upload
           app_location: frontend
           output_location: dist
-          skip_app_build: true
+          skip_app_build: false
 
       - name: Smoke test frontend (opcional)
         if: ${{ env.AZURE_STATIC_WEB_APP_URL != '' }}
