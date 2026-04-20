@@ -13,11 +13,15 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.13"
-  allowed-origins: ${{ secrets.AZURE_ALLOWED_ORIGINS }}
-  openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+  ALLOWED_ORIGINS: ${{ secrets.AZURE_ALLOWED_ORIGINS }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
 
 jobs:
   test-and-deploy:
+    environment:
+      name: develop
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -47,35 +51,35 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Configurar app settings (opcionales)
-        if: ${{ env.allowed-origins != '' || env.openai-api-key != '' }}
+        if: ${{ env.ALLOWED_ORIGINS != '' || env.OPENAI_API_KEY != '' }}
         shell: bash
         run: |
           SETTINGS=()
-          if [ -n "${{ env.allowed-origins }}" ]; then
-            SETTINGS+=("ALLOWED_ORIGINS=${{ env.allowed-origins }}")
+          if [ -n "${{ env.ALLOWED_ORIGINS }}" ]; then
+            SETTINGS+=("ALLOWED_ORIGINS=${{ env.ALLOWED_ORIGINS }}")
           fi
 
-          if [ -n "${{ env.openai-api-key }}" ]; then
-            SETTINGS+=("OPENAI_API_KEY=${{ env.openai-api-key }}")
+          if [ -n "${{ env.OPENAI_API_KEY }}" ]; then
+            SETTINGS+=("OPENAI_API_KEY=${{ env.OPENAI_API_KEY }}")
           fi
 
           if [ ${#SETTINGS[@]} -gt 0 ]; then
             az webapp config appsettings set \
-              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-              --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ env.AZURE_WEBAPP_NAME }}" \
               --settings "${SETTINGS[@]}"
           fi
 
       - name: Desplegar backend a App Service
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: backend
 
       - name: Smoke tests backend
         shell: bash
         env:
-          BASE_URL: https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net
+          BASE_URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
         run: |
           python - <<'PY'
           import json
@@ -83,7 +87,6 @@ jobs:
           import urllib.request
 
           base_url = os.environ["BASE_URL"].rstrip("/")
-          print(f"Base URL: {base_url}")
           
           def get_json(url: str) -> tuple[int, dict]:
               req = urllib.request.Request(url, method="GET")
