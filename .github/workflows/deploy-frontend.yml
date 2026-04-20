@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  static-web-app-url: ${{ secrets.AZURE_STATIC_WEB_APP_URL }}
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -46,10 +49,10 @@ jobs:
           skip_app_build: true
 
       - name: Smoke test frontend (opcional)
-        if: ${{ secrets.AZURE_STATIC_WEB_APP_URL != '' }}
+        if: ${{ env.static-web-app-url != '' }}
         shell: bash
         env:
-          SWA_URL: ${{ secrets.AZURE_STATIC_WEB_APP_URL }}
+          SWA_URL: ${{ env.static-web-app-url }}
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$SWA_URL")
           if [ "$STATUS" != "200" ]; then

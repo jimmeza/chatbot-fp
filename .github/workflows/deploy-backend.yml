@@ -13,6 +13,8 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.13"
+  allowed-origins: ${{ secrets.AZURE_ALLOWED_ORIGINS }}
+  openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
 jobs:
   test-and-deploy:
@@ -45,16 +47,16 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Configurar app settings (opcionales)
-        if: ${{ secrets.AZURE_ALLOWED_ORIGINS != '' || secrets.OPENAI_API_KEY != '' }}
+        if: ${{ env.allowed-origins != '' || env.openai-api-key != '' }}
         shell: bash
         run: |
           SETTINGS=()
-          if [ -n "${{ secrets.AZURE_ALLOWED_ORIGINS }}" ]; then
-            SETTINGS+=("ALLOWED_ORIGINS=${{ secrets.AZURE_ALLOWED_ORIGINS }}")
+          if [ -n "${{ env.allowed-origins }}" ]; then
+            SETTINGS+=("ALLOWED_ORIGINS=${{ env.allowed-origins }}")
           fi
 
-          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-            SETTINGS+=("OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}")
+          if [ -n "${{ env.openai-api-key }}" ]; then
+            SETTINGS+=("OPENAI_API_KEY=${{ env.openai-api-key }}")
           fi
 
           if [ ${#SETTINGS[@]} -gt 0 ]; then
