@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(chat.router, tags=["chat"])
 
 
 @app.get("/health", tags=["health"])
