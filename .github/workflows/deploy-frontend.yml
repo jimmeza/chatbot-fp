@@ -2,7 +2,7 @@ name: Deploy Frontend (Static Web App)
 
 on:
   push:
-    branches: [main]
+    branches: [master, develop]
     paths:
       - frontend/**
       - .github/workflows/deploy-frontend.yml
