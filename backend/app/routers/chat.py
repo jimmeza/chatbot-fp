@@ -11,3 +11,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     Recibe un mensaje del usuario y devuelve la respuesta del chatbot.
     """
     return process_message(request)
+
+@router.get("/health/", tags=["health"])
+async def health_check():
+    return {"status": "ok"}
