@@ -13,6 +13,7 @@ permissions:
 
 env:
   AZURE_STATIC_WEB_APP_URL: ${{ vars.AZURE_STATIC_WEB_APP_URL }}
+  VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
 
 jobs:
   build-and-deploy:

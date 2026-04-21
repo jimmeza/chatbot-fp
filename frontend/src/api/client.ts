@@ -1,6 +1,6 @@
 import type { ChatRequest, ChatResponse } from "../types";
 
-const BASE = "/api";
+const BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
 /**
  * Envía un mensaje al backend y devuelve la respuesta del chatbot.
